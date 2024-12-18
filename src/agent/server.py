@@ -27,6 +27,10 @@ import random
 import re
 from traceback import print_exc
 
+import json
+import datetime
+import decimal
+
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -94,7 +98,7 @@ class Message(BaseModel):
 
     @validator('role')
     def validate_role(cls, value):
-        """ Field validator function to validate values of the field role"""
+        """Field validator function to validate values of the field role"""
         value = bleach.clean(value, strip=True)
         valid_roles = {'user', 'assistant', 'system'}
         if value.lower() not in valid_roles:
@@ -338,6 +342,52 @@ def fallback_response_generator(sentence: str, session_id: str = ""):
     chain_response.choices.append(response_choice)
     yield "data: " + str(chain_response.json()) + "\n\n"
 
+## chris for debug logs 
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        # Handle datetime.date
+        if isinstance(obj, datetime.date):
+            return obj.isoformat()
+
+        # Handle Decimal
+        if isinstance(obj, decimal.Decimal):
+            # Convert Decimal to string or float
+            return str(obj)
+        
+        # Handle HumanMessage
+        if obj.__class__.__name__ == "HumanMessage":
+            return {
+                "type": "HumanMessage",
+                "content": obj.content,
+                "additional_kwargs": obj.additional_kwargs,
+                "response_metadata": getattr(obj, 'response_metadata', None),
+                "id": getattr(obj, 'id', None)
+            }
+        
+        # Handle AIMessage
+        if obj.__class__.__name__ == "AIMessage":
+            return {
+                "type": "AIMessage",
+                "content": obj.content,
+                "additional_kwargs": obj.additional_kwargs,
+                "response_metadata": getattr(obj, 'response_metadata', None),
+                "id": getattr(obj, 'id', None),
+                "role": getattr(obj, 'role', None),
+                "tool_calls": getattr(obj, 'tool_calls', None),
+                "usage_metadata": getattr(obj, 'usage_metadata', None)
+            }
+
+        # Handle ToolMessage
+        if obj.__class__.__name__ == "ToolMessage":
+            return {
+                "type": "ToolMessage",
+                "content": obj.content,
+                "tool_call_id": getattr(obj, 'tool_call_id', None),
+                "id": getattr(obj, 'id', None)
+            }
+        
+        # For any other objects, fallback to the superclass method
+        return super().default(obj)
 
 @app.post(
     "/generate",
@@ -427,6 +477,14 @@ async def generate_answer(request: Request,
                     graph_timeout_env =  os.environ.get('GRAPH_TIMEOUT_IN_SEC', None)
                     app.agent.graph.step_timeout = int(graph_timeout_env) if graph_timeout_env else None
                     async for event in app.agent.graph.astream_events(input_for_graph, version="v2", config=config, debug=debug_langgraph):
+                        # print("#### DEBUG AGENT EVENT LOGS ####\n" + event)
+                        logger.info("#### DEBUG AGENT EVENT LOGS ####")
+                        try:
+                            logger.info(json.dumps(event, indent=2, cls=CustomJSONEncoder))
+                        except TypeError as e:
+                            # If we still can't serialize, fallback to str
+                            logger.error(f"Object not serializable: {e}")
+                            logger.info(str(event))
                         kind = event["event"]
                         tags = event.get("tags", [])
                         if kind == "on_chain_end" and event['data'].get('output', "") == '__end__':

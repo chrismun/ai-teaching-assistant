@@ -39,6 +39,7 @@ class VannaWrapper(Milvus_VectorStore, NvidiaLLM):
         milvus_client = MilvusClient(uri=milvus_db_url)
         Milvus_VectorStore.__init__(self, config={"embedding_function": emb_function, "milvus_client": milvus_client})
         NvidiaLLM.__init__(self, config=config)
+        # self.remove_all_training_data()
 
     def connect_to_postgres(
         self,
@@ -190,22 +191,23 @@ class VannaWrapper(Milvus_VectorStore, NvidiaLLM):
             if statement.get_type() == 'SELECT':
                 logger.info(f"The SQL Statement {str(statement)} is of type SELECT and is safe")
                 sql_validation = True
-    
-                # Convert the statement to a string for regex-based parsing
-                statement_str = str(statement)
 
-                # Check if there's a WHERE clause with the specified customer_id filter
-                where_clause_match = re.search(r"WHERE\s+.*customer_id\s*=\s*['\"]?" + re.escape(str(customer_id)) + r"['\"]?", statement_str, re.IGNORECASE)
-                # Find all occurrences of customer_id conditions in the statement
-                customer_id_matches = re.findall(r"customer_id\s*=\s*['\"]?(\d+)['\"]?", statement_str, re.IGNORECASE)
-                logger.info(f"WHERE clause: {where_clause_match}, is matched with customer_id: {customer_id}")
-                logger.info(f"Number of Customer IDs: {customer_id_matches}")
-                if where_clause_match and len(customer_id_matches) == 1:
-                    customer_id_validation = True
-                logger.info(f"customer_id_validation: {customer_id_validation}")
+                # TODO: Course or student id validation? 
+                # Convert the statement to a string for regex-based parsing
+                # statement_str = str(statement)
+
+                # # Check if there's a WHERE clause with the specified customer_id filter
+                # where_clause_match = re.search(r"WHERE\s+.*customer_id\s*=\s*['\"]?" + re.escape(str(customer_id)) + r"['\"]?", statement_str, re.IGNORECASE)
+                # # Find all occurrences of customer_id conditions in the statement
+                # customer_id_matches = re.findall(r"customer_id\s*=\s*['\"]?(\d+)['\"]?", statement_str, re.IGNORECASE)
+                # logger.info(f"WHERE clause: {where_clause_match}, is matched with customer_id: {customer_id}")
+                # logger.info(f"Number of Customer IDs: {customer_id_matches}")
+                # if where_clause_match and len(customer_id_matches) == 1:
+                #     customer_id_validation = True
+                # logger.info(f"customer_id_validation: {customer_id_validation}")
     
         # Return True only if both the SQL validation and customer_id validation passed
-        return sql_validation and customer_id_validation
+        return sql_validation 
     
 
     def _get_ddl_data(self) -> list[dict]:
@@ -253,11 +255,29 @@ class VannaWrapper(Milvus_VectorStore, NvidiaLLM):
                 }
 
         return list(tables.values())
+    
+    # CM tmp workaround cached training data
+    def remove_all_training_data(self):
+        collections = ["vannasql", "vannaddl", "vannadoc"]
 
-    def do_training(self, method: str = "ddl"):
+        for collection in collections:
+            if self.milvus_client.has_collection(collection):
+                try:
+                    self.milvus_client.delete(collection_name=collection, ids=["*"])
+                    logger.info(f"Deleted all data in collection: {collection}")
+                except Exception as e:
+                    logger.error(f"Error while clearing data in collection {collection}: {e}")
+
+    # CM tmp workaround cached training data 
+    def get_training_data(self, **kwargs) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    def do_training(self, method: str = "schema"):
+        
+        # self.remove_all_training_data()
         
         if self.get_training_data().empty:
-            logger.info(f"Training metnod: {method}")
+            logger.info(f"Training method: {method}")
             logger.info(f"No Training data found, training with {method}")
             if method == "ddl":
                 # Define the Jinja template

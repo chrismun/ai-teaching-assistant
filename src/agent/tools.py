@@ -34,8 +34,14 @@ logger = logging.getLogger(__name__)
 @tool
 @lru_cache
 def structured_rag(query: str, user_id: str) -> str:
-    """Use this for answering personalized queries about orders, returns, refunds, and account-specific issues."""
-    entry_doc_search = {"query": query, "top_k": 4, "user_id": user_id}
+    """Use this for answering questions about homework, including grades, due dates, assignment details."""
+    example_query = """
+SELECT *
+FROM homework
+WHERE student_id = 1;
+"""
+
+    entry_doc_search = {"query": query + f"\n\nExample query: {example_query}", "top_k": 4, "user_id": user_id}
     aggregated_content = ""
     try:
         response = requests.post(structured_rag_search, json=entry_doc_search)
@@ -45,63 +51,63 @@ def structured_rag(query: str, user_id: str) -> str:
             raise ValueError(f"Error while retireving docs: {response.json()}")
         
         aggregated_content = "\n".join(chunk["content"] for chunk in response.json().get("chunks", []))
+        logger.info("&&&&&&& structured rag results")
+        logger.info(aggregated_content)
         # Check if aggregated_content contains the specific phrase in a case-insensitive manner
         if any(x in aggregated_content.lower() for x in ["no records found", "error:"]):
             raise ValueError("No records found for the specified criteria.")
         return aggregated_content
     except Exception as e:
-        logger.info(f"Some error within the structured_rag {e}, sending purchase_history")
-        return get_purchase_history(user_id)
+        logger.info(f"Some error within the structured_rag {e}, sending student_overview")
+        return get_student_overview(user_id)
 
 
-@tool
-@lru_cache
-def get_purchase_history(user_id: str) -> str:
-    """Retrieves the recent return and order details for a user,
-    including order ID, product name, status, relevant dates, quantity, and amount."""
-
-    SQL_QUERY = f"""
-    SELECT order_id, product_name, order_date, order_status, quantity, order_amount, return_status,
-    return_start_date, return_received_date, return_completed_date, return_reason, notes
-    FROM public.customer_data
-    WHERE customer_id={user_id}
-    ORDER BY order_date DESC
-    LIMIT 15;
+def get_student_overview(user_id: str) -> dict:
+    """
+    Retrieves a comprehensive overview of a student's data from the `students` table.
+    This includes the student's basic info and excludes homework details.
     """
 
+    STUDENT_INFO_QUERY = f"""
+    SELECT student_id, first_name, last_name, email, major, enrollment_year
+    FROM public.students
+    WHERE student_id = {user_id};
+    """
     app_database_url = get_config().database.url
-
-    # Parse the URL
     parsed_url = urlparse(f"//{app_database_url}", scheme='postgres')
-
-    # Extract host and port
     host = parsed_url.hostname
     port = parsed_url.port
 
     db_params = {
-        'dbname': os.getenv("CUSTOMER_DATA_DB",'customer_data'),
-        'user': os.getenv('POSTGRES_USER_READONLY', None),
-        'password': os.getenv('POSTGRES_PASSWORD_READONLY', None),
+        'dbname': os.getenv("CUSTOMER_DATA_DB", 'customer_data'),
+        'user': os.getenv("POSTGRES_USER_READONLY", 'postgres'),
+        'password': os.getenv("POSTGRES_PASSWORD_READONLY", 'password'),
         'host': host,
         'port': port
     }
 
-    # Using context manager for connection and cursor
+    overview = {
+        "student_info": {}
+    }
+
     with psycopg2.connect(**db_params) as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute(SQL_QUERY)
-            result = cur.fetchall()
+            cur.execute(STUDENT_INFO_QUERY)
+            student_info = cur.fetchone()
+            if student_info:
+                overview["student_info"] = dict(student_info)
 
-    # Returning result as a list of dictionaries
-    return [dict(row) for row in result]
+    return overview
 
 
-@tool
-@lru_cache
-def get_recent_return_details(user_id: str) -> str:
-    """Retrieves the recent return details for a user, including order ID, product name, return status, and relevant dates."""
 
-    return get_purchase_history(user_id)
+
+# @tool
+# @lru_cache
+# def get_recent_return_details(user_id: str) -> str:
+#     """Retrieves the recent return details for a user, including order ID, product name, return status, and relevant dates."""
+
+#     return get_purchase_history(user_id)
 
 
 @tool
@@ -209,31 +215,84 @@ class ToProductQAAssistant(BaseModel):
             }
         }
 
-class ToOrderStatusAssistant(BaseModel):
+class ToCourseInfoAssistant(BaseModel):
     """
-    Delegates queries specifically related to orders or purchase history to a specialized assistant.
-    This assistant handles inquiries regarding Order ID, Order Date, Quantity, Order Amount, Order Status, 
-    and any other questions related to the user's purchase history.
+    Transfers work to a specialized assistant that handles queries specifically related to course content that can be found in a syllabus. 
+    This assistant can answer queries about syllabus structure, reading lists, lecture topics, 
+    and general academic guidelines for the course, as opposed to the student's performance such as homework.
     """
-
     query: str = Field(
-        description="The specific query regarding the order or purchase history, such as order status, delivery updates, or historical purchase information."
+        description="A course content-related question, such as topics covered in the syllabus, reading recommendations, assignment descriptions, or lecture details."
     )
+
     user_id: str = Field(
-        description="The unique identifier of the user."
+        description="The unique identifier of the student making the query."
     )
 
     class Config:
         json_schema_extra = {
             "example": {
-                "query": "What is the current status of my order?",
-                "user_id": "1"
-            },
-             "example 2": {
-                "query": "How many items were ordered on 2024-10-15?",
-                "user_id": "2"
+                "query": "What topics are covered in the syllabus for Computer Science 101?",
+                "user_id": "12345"
             }
         }
+
+
+class ToHomeworkStatusAssistant(BaseModel):
+    """
+    Delegates queries related to a student's homework status and performance within a course to a specialized assistant.
+    This includes inquiries about completed homework, grades on assignments, upcoming deadlines, 
+    pending submissions, and other homework-related progress metrics tied to the user's academic record.
+    It leverages data generated and stored from the relevant database schema.
+    """
+
+    query: str = Field(
+        description=(
+            "A homework-related question, such as completed assignments, "
+            "homework-specific grades, pending tasks, upcoming deadlines, or performance on recent submissions."
+        )
+    )
+    user_id: str = Field(
+        description="The unique identifier of the student making the query."
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "What is my grade on Homework 3 for Physics 101, and are there any pending assignments?",
+                "user_id": "12345"
+            }
+        }
+
+
+
+
+# class ToOrderStatusAssistant(BaseModel):
+#     """
+#     Delegates queries specifically related to orders or purchase history to a specialized assistant.
+#     This assistant handles inquiries regarding Order ID, Order Date, Quantity, Order Amount, Order Status, 
+#     and any other questions related to the user's purchase history.
+#     """
+
+#     query: str = Field(
+#         description="The specific query regarding the order or purchase history, such as order status, delivery updates, or historical purchase information."
+#     )
+#     user_id: str = Field(
+#         description="The unique identifier of the user."
+#     )
+
+#     class Config:
+#         json_schema_extra = {
+#             "example": {
+#                 "query": "What is the current status of my order?",
+#                 "user_id": "1"
+#             },
+#              "example 2": {
+#                 "query": "How many items were ordered on 2024-10-15?",
+#                 "user_id": "2"
+#             }
+#         }
+
 
 class ToReturnProcessing(BaseModel):
     """

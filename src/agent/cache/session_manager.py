@@ -41,23 +41,18 @@ class SessionManager:
             raise ValueError(f"{db_name} in not supported. Supported type redis, inmemory")
 
 
-    # TODO: Create API to get last k conversation from database instead of returning everything
     def get_conversation(self, session_id: str) -> List:
         return self.memory.get_conversation(session_id)
-
 
     def get_k_conversation(self, session_id: str, k_turn: Optional[int] = None) -> List:
         return self.memory.get_k_conversation(session_id, k_turn)
 
-
     def save_conversation(self, session_id: str, user_id: Optional[str], conversation: List) -> bool:
         return self.memory.save_conversation(session_id, user_id, conversation)
-
 
     def is_session(self, session_id: str) -> bool:
         """Check if session_id already exist in database"""
         return self.memory.is_session(session_id)
-
 
     def get_session_info(self, session_id: str) -> Dict:
         """Retrieve complete session information from database"""

@@ -1,2 +1,6 @@
+data/
+*/data/
+deploy/compose/huggingface/
+deploy/compose/ngc/
 deploy/compose/volumes/
 notebooks/.ipynb_checkpoints

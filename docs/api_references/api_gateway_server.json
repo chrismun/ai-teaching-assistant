@@ -206,7 +206,7 @@
         },
         "type": "object",
         "title": "AgentResponse",
-        "description": "Definition of Chain APIs resopnse data type"
+        "description": "Definition of Chain APIs response data type"
       },
       "AgentResponseChoices": {
         "properties": {

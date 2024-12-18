@@ -1,7 +1,7 @@
 services:
   nemollm-inference:
     container_name: nemollm-inference-microservice
-    image: nvcr.io/nim/meta/llama-3.1-70b-instruct:1.1
+    image: nvcr.io/nim/nv-mistralai/mistral-nemo-12b-instruct:latest
     volumes:
     # Use current path for model directory if nothing is specified
     - ${MODEL_DIRECTORY:-.}:/opt/nim/.cache
@@ -19,7 +19,7 @@ services:
           devices:
             - driver: nvidia
               # count: ${INFERENCE_GPU_COUNT:-all}
-              device_ids: ['${LLM_MS_GPU_ID:-0,1,2,3}']
+              device_ids: ['${LLM_MS_GPU_ID:-0,1}']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
@@ -46,7 +46,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['${EMBEDDING_MS_GPU_ID:-4}']
+              device_ids: ['${EMBEDDING_MS_GPU_ID:-2}']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
@@ -78,7 +78,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['${RANKING_MS_GPU_ID:-5}']
+              device_ids: ['${RANKING_MS_GPU_ID:-4}']
               capabilities: [gpu]
     profiles: ["local-nim"]
 

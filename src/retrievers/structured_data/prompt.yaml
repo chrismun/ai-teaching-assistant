@@ -1,4 +1,4 @@
-prompts:
+prompts: # TODO: Double check neither of these appear to be used
 
   data_retrieval_template: |
     You are an expert data retrieval agent who writes functional python code and utilzes Pandas library in python for data retrieval.
@@ -13,7 +13,7 @@ prompts:
     - dfs is a list containing df a pandas dataframe. Always use the first entry from the list like df = dfs[0].
     {instructions}
 
-  dataframe_prompts:
+  dataframe_prompts: 
     customer_data:
       description: |
         This data frame tracks customer orders, including product details, order quantity, and order amount. 
@@ -23,20 +23,20 @@ prompts:
         - Provide meaningful error messages in the format {"error": "some message"} if the user queries do not match any records or if an invalid input is given. 
         For example, respond with {"error": "No records found for the specified criteria."} when applicable.
 
-static_db_schema: |
-  CREATE TABLE customer_data (
-  "customer_id" INTEGER,
-  "notes" TEXT,
-  "order_amount" NUMERIC,
-  "order_date" DATE, 
-  "order_id" INTEGER,
-  "order_status" CHARACTER VARYING,
-  "product_description" CHARACTER VARYING,
-  "product_name" CHARACTER VARYING,
-  "quantity" INTEGER,
-  "return_completed_date" DATE,
-  "return_reason" CHARACTER VARYING,
-  "return_received_date" DATE,
-  "return_start_date" DATE,
-  "return_status" CHARACTER VARYING
-  );
+# static_db_schema: |
+#   CREATE TABLE customer_data (
+#   "customer_id" INTEGER,
+#   "notes" TEXT,
+#   "order_amount" NUMERIC,
+#   "order_date" DATE, 
+#   "order_id" INTEGER,
+#   "order_status" CHARACTER VARYING,
+#   "product_description" CHARACTER VARYING,
+#   "product_name" CHARACTER VARYING,
+#   "quantity" INTEGER,
+#   "return_completed_date" DATE,
+#   "return_reason" CHARACTER VARYING,
+#   "return_received_date" DATE,
+#   "return_start_date" DATE,
+#   "return_status" CHARACTER VARYING
+#   );

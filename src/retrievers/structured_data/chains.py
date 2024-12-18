@@ -46,7 +46,7 @@ vaana_client.connect_to_postgres(
     port=parsed_url.port
     )
 # Do Training from static schmea
-vaana_client.do_training(method="schema")
+# vaana_client.do_training(method="schema")
 
 class CSVChatbot(BaseExample):
     """RAG example showcasing CSV parsing using Vaana AI Agent"""
