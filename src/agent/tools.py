@@ -31,21 +31,53 @@ structured_rag_search = f"{structured_rag_uri}/search"
 prompts = get_prompts()
 logger = logging.getLogger(__name__)
 
+
 @tool
 @lru_cache
-def structured_rag(query: str, user_id: str) -> str:
-    """Use this for answering questions about homework, including grades, due dates, assignment details."""
+def discussion_board_rag(query: str, user_id: str) -> str:
+    """Use this for answering questions about discussion boards, including posts, replies, and participation grades."""
     example_query = """
+SELECT * FROM discussions 
+WHERE LOWER(title) LIKE '%momentum%' 
+OR LOWER(content) LIKE '%momentum%';
+    """
+    
+    entry_doc_search = {
+        "query": query + f"\n\nExample query: {example_query}",
+        "top_k": 4,
+        "user_id": user_id
+    }
+    
+    try:
+        response = requests.post(structured_rag_search, json=entry_doc_search)
+        if response.status_code != 200:
+            raise ValueError(f"Error retrieving discussion posts: {response.json()}")
+            
+        aggregated_content = "\n".join(chunk["content"] for chunk in response.json().get("chunks", []))
+        
+        if any(x in aggregated_content.lower() for x in ["no records found", "error:"]):
+            raise ValueError("No discussion posts found.")
+            
+        return aggregated_content
+    except Exception as e:
+        logger.info(f"Error in discussion_board_rag: {e}")
+        return "No discussion board data available."
+
+
+@tool
+@lru_cache
+def hw_rag(query: str, user_id: str) -> str:
+    """Use this for answering questions about homework, including grades, due dates, assignment details. Match homework number based on name e.g. 'Homework 1' rather than using the id."""
+    example_query = f"""
 SELECT *
 FROM homework
-WHERE student_id = 1;
+WHERE student_id = {user_id};
 """
 
-    entry_doc_search = {"query": query + f"\n\nExample query: {example_query}", "top_k": 4, "user_id": user_id}
+    entry_doc_search = {"query": query + f"\n\nIf asked for specific homework, match homework number based on name e.g. 'Homework 1' rather than using the id. Example query: {example_query}", "top_k": 4, "user_id": user_id}
     aggregated_content = ""
     try:
         response = requests.post(structured_rag_search, json=entry_doc_search)
-        # Extract and aggregate the content
         logger.info(f"Actual Structured Response : {response}")
         if response.status_code != 200:
             raise ValueError(f"Error while retireving docs: {response.json()}")
@@ -53,13 +85,57 @@ WHERE student_id = 1;
         aggregated_content = "\n".join(chunk["content"] for chunk in response.json().get("chunks", []))
         logger.info("&&&&&&& structured rag results")
         logger.info(aggregated_content)
-        # Check if aggregated_content contains the specific phrase in a case-insensitive manner
         if any(x in aggregated_content.lower() for x in ["no records found", "error:"]):
             raise ValueError("No records found for the specified criteria.")
         return aggregated_content
     except Exception as e:
         logger.info(f"Some error within the structured_rag {e}, sending student_overview")
         return get_student_overview(user_id)
+
+@tool
+@lru_cache
+def exam_status_rag(query: str, user_id: str) -> str:
+    """Fetch exam information including grades, dates, and course details."""
+    example_query = f"""
+    SELECT exam_id, exam_name, exam_date, grade, course_name 
+    FROM exams 
+    WHERE student_id = {user_id}
+    ORDER BY exam_date DESC;
+    """
+    
+    entry_doc_search = {
+        "query": query + f"\n\nExample query: {example_query}",
+        "top_k": 5,
+        "user_id": user_id
+    }
+    
+    try:
+        response = requests.post(structured_rag_search, json=entry_doc_search)
+        if response.status_code != 200:
+            raise ValueError(f"Error retrieving exam data: {response.json()}")
+            
+        return response.json().get("content", "No exam data available.")
+    except Exception as e:
+        logger.error(f"Error in exam_status_rag: {e}")
+        return "Unable to fetch exam information."
+
+class ToExamAssistant(BaseModel):
+    """Handles specific exam-related queries including grades. Remember that the course_qa tool has the syllabus for more general questions."""
+    query: str = Field(
+        description="An exam-related question about grades, dates, or performance."
+    )
+    user_id: str = Field(
+        description="The unique identifier of the student making the query."
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "What was my grade in the last Fluid Dynamics exam?",
+                "user_id": "12345"
+            }
+        }
+
 
 
 def get_student_overview(user_id: str) -> dict:
@@ -265,6 +341,25 @@ class ToHomeworkStatusAssistant(BaseModel):
         }
 
 
+class ToDiscussionBoardAssistant(BaseModel):
+    """
+    Delegates queries related to discussion boards to a specialized assistant.
+    Handles inquiries about posts, replies, participation grades, and deadlines.
+    """
+    query: str = Field(
+        description="A discussion board related question about posts, replies, or participation."
+    )
+    user_id: str = Field(
+        description="The unique identifier of the student making the query."
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "query": "How many posts have I made in the Week 3 discussion?",
+                "user_id": "12345"
+            }
+        }
 
 
 # class ToOrderStatusAssistant(BaseModel):

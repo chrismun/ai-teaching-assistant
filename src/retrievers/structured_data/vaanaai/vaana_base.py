@@ -215,29 +215,31 @@ class VannaWrapper(Milvus_VectorStore, NvidiaLLM):
         tables: dict[str, dict] = {}
 
         res_sql_query = """
-            WITH relevant_tables AS (
-                SELECT
-                    table_name,
-                    table_schema
-                FROM
-                    information_schema.tables
-                WHERE
-                    table_schema = 'public'
-            )
-            SELECT
-                relevant_tables.table_name AS table_name,
-                c.column_name AS col_name,
-                UPPER(data_type) AS col_type
-            FROM
-                information_schema.columns c
-            INNER JOIN
-                relevant_tables
-            ON
-                relevant_tables.table_schema = c.table_schema
-                AND relevant_tables.table_name = c.table_name
-            ORDER BY
-                col_name ASC
-        """
+WITH relevant_tables AS (
+    SELECT
+        table_name,
+        table_schema
+    FROM
+        information_schema.tables
+    WHERE
+        table_schema = 'public'
+        AND table_name <> 'customer_data'  -- Exclude the 'customer_data' table
+)
+SELECT
+    relevant_tables.table_name AS table_name,
+    c.column_name AS col_name,
+    UPPER(c.data_type) AS col_type
+FROM
+    information_schema.columns c
+INNER JOIN
+    relevant_tables
+ON
+    relevant_tables.table_schema = c.table_schema
+    AND relevant_tables.table_name = c.table_name
+ORDER BY
+    col_name ASC
+"""  # CM changed to ignore customer_data
+
         res = self.run_sql(res_sql_query)
         for _, row in res.iterrows():
             table_name = row["table_name"]
@@ -330,7 +332,7 @@ class VannaWrapper(Milvus_VectorStore, NvidiaLLM):
         """
 
         try:
-            query = question + f", for user_id: {user_id}"
+            query = question + f"\n\nYou MUST filter by student_id = {user_id} if applicable. Use broad queries, minimal filters. Select 4-5 columns so that the output is not too large, but also is interpretable."
             logger.info(f"input query with user_id: {query}")
             
             sql = self.generate_sql(question=query, allow_llm_to_see_data=True)

@@ -25,7 +25,9 @@ from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import tools_condition
 from langchain_core.runnables import RunnableConfig
 from src.agent.tools import (
-         get_student_overview, ToCourseInfoAssistant, ToHomeworkStatusAssistant, structured_rag, get_student_overview, HandleOtherTalk,
+         get_student_overview, ToCourseInfoAssistant, ToHomeworkStatusAssistant, hw_rag, get_student_overview, HandleOtherTalk,
+         discussion_board_rag, ToDiscussionBoardAssistant,
+         exam_status_rag, ToExamAssistant
 )
 
 from src.agent.utils import create_tool_node_with_fallback, get_checkpointer, canonical_rag
@@ -173,7 +175,7 @@ class Assistant:
             runnable = self.prompt | llm.bind_tools(self.tools)
             last_message = state["messages"][-1]
             messages = []
-            if isinstance(last_message, ToolMessage) and last_message.name in ["structured_rag", "return_window_validation", "update_return", "get_purchase_history", "get_recent_return_details"]: # old
+            if isinstance(last_message, ToolMessage) and last_message.name in ["hw_rag", "return_window_validation", "update_return", "get_purchase_history", "get_recent_return_details"]: # old
                 gen = runnable.with_config(
                 tags=["should_stream"],
                 callbacks=config.get(
@@ -201,7 +203,7 @@ class Assistant:
                 break
         return {"messages": result}
 
-# course status Assistant
+### course status Assistant (TODO shouldnt this go below subagents)
 homework_status_prompt_template = prompts.get("homework_status_template", "")
 
 homework_status_prompt = ChatPromptTemplate.from_messages(
@@ -214,21 +216,8 @@ homework_status_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-homework_status_safe_tools = [structured_rag]
+homework_status_safe_tools = [hw_rag]
 homework_status_tools = homework_status_safe_tools
-
-# Return Processing Assistant
-# return_processing_prompt_template = prompts.get("return_processing_template", "")
-
-# return_processing_prompt = ChatPromptTemplate.from_messages(
-#     [
-#         (
-#             "system",
-#             return_processing_prompt_template
-#         ),
-#         ("placeholder", "{messages}"),
-#     ]
-# )
 
 # return_processing_safe_tools = [get_recent_return_details, return_window_validation]
 # return_processing_sensitive_tools = [update_return]
@@ -250,6 +239,8 @@ primary_assistant_tools = [
         HandleOtherTalk,
         ToCourseInfoAssistant,
         ToHomeworkStatusAssistant,
+        ToDiscussionBoardAssistant,
+        ToExamAssistant
         # ToReturnProcessing,
     ]
 
@@ -303,6 +294,81 @@ def route_homework_status(
 
 builder.add_edge("homework_status_safe_tools", "homework_status")
 builder.add_conditional_edges("homework_status", route_homework_status)
+
+# Discussion board asst 
+discussion_board_tools = [discussion_board_rag]
+
+discussion_board_prompt = prompts.get("discussion_board_template", "")
+discussion_board_prompt = ChatPromptTemplate.from_messages([
+    ("system", discussion_board_prompt),
+    ("placeholder", "{messages}"),
+])
+
+builder.add_node(
+    "enter_discussion_board",
+    create_entry_node("Discussion Board Assistant")
+)
+builder.add_node(
+    "discussion_board",
+    Assistant(discussion_board_prompt, discussion_board_tools)
+)
+builder.add_edge("enter_discussion_board", "discussion_board")
+
+builder.add_node(
+    "discussion_board_tools",
+    create_tool_node_with_fallback(discussion_board_tools),
+)
+
+def route_discussion_board(
+    state: State,
+) -> Literal["discussion_board_tools", "__end__"]:
+    route = tools_condition(state)
+    if route == END:
+        return END
+    return "discussion_board_tools"
+
+builder.add_edge("discussion_board_tools", "discussion_board")
+builder.add_conditional_edges("discussion_board", route_discussion_board)
+
+
+# Exam Assistant
+exam_status_tools = [exam_status_rag]
+
+exam_status_prompt = prompts.get("exam_status_template", "")
+exam_status_prompt = ChatPromptTemplate.from_messages([
+    ("system", exam_status_prompt),
+    ("placeholder", "{messages}"),
+])
+
+# Add nodes
+builder.add_node(
+    "enter_exam_status",
+    create_entry_node("Exam Status Assistant")
+)
+builder.add_node(
+    "exam_status",
+    Assistant(exam_status_prompt, exam_status_tools)
+)
+builder.add_edge("enter_exam_status", "exam_status")
+
+# Add tool node
+builder.add_node(
+    "exam_status_tools",
+    create_tool_node_with_fallback(exam_status_tools),
+)
+
+# Add routing function
+def route_exam_status(
+    state: State,
+) -> Literal["exam_status_tools", "__end__"]:
+    route = tools_condition(state)
+    if route == END:
+        return END
+    return "exam_status_tools"
+
+builder.add_edge("exam_status_tools", "exam_status")
+builder.add_conditional_edges("exam_status", route_exam_status)
+
 
 # Create return_processing Assistant
 # builder.add_node("return_validation", validate_product_info)
@@ -371,27 +437,30 @@ builder.add_node(
     "other_talk", handle_other_talk
 )
 
-#  Add "primary_assistant_tools", if necessary
 def route_primary_assistant(
     state: State,
 ) -> Literal[
     "enter_course_qa",
     "enter_homework_status",
-    # "enter_return_processing",
+    "enter_discussion_board",
+    "enter_exam_status",
     "other_talk",
     "__end__",
 ]:
     route = tools_condition(state)
     if route == END:
         return END
+    
     tool_calls = state["messages"][-1].tool_calls
     if tool_calls:
         if tool_calls[0]["name"] == ToCourseInfoAssistant.__name__:
             return "enter_course_qa"
         elif tool_calls[0]["name"] == ToHomeworkStatusAssistant.__name__:
             return "enter_homework_status"
-        # elif tool_calls[0]["name"] == ToReturnProcessing.__name__:
-        #     return "enter_return_processing"
+        elif tool_calls[0]["name"] == ToDiscussionBoardAssistant.__name__:
+            return "enter_discussion_board"
+        elif tool_calls[0]["name"] == ToExamAssistant.__name__:
+            return "enter_exam_status"
         elif tool_calls[0]["name"] == HandleOtherTalk.__name__:
             return "other_talk"
     raise ValueError("Invalid route")
@@ -407,7 +476,8 @@ builder.add_conditional_edges(
     {
         "enter_course_qa": "enter_course_qa",
         "enter_homework_status": "enter_homework_status",
-        # "enter_return_processing": "enter_return_processing",
+        "enter_discussion_board": "enter_discussion_board",
+        "enter_exam_status": "enter_exam_status",
         "other_talk":"other_talk",
         END: END,
     },
